@@ -1,6 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import { h, ref } from 'vue';
 import Popover from '../Popover.vue';
+import Dialog from 'dashboard/components-next/dialog/Dialog.vue';
 
 const belowMd = ref(false);
 
@@ -16,7 +17,7 @@ vi.mock('@vueuse/core', async importOriginal => ({
 describe('Popover', () => {
   let wrapper;
 
-  const mountPopover = (props = {}) => {
+  const mountPopover = (props = {}, options = {}) => {
     wrapper = mount(Popover, {
       props,
       slots: {
@@ -32,6 +33,7 @@ describe('Popover', () => {
         stubs: { teleport: true },
       },
       attachTo: document.body,
+      ...options,
     });
     return wrapper;
   };
@@ -209,6 +211,151 @@ describe('Popover', () => {
       await openPopover();
       expect(mobileBackdrop().exists()).toBe(false);
       expect(desktopPopover().exists()).toBe(true);
+    });
+  });
+
+  describe('native dialog teleport target', () => {
+    it('keeps desktop content in the dialog containing its trigger', async () => {
+      const dialog = document.createElement('dialog');
+      document.body.appendChild(dialog);
+      mountPopover(
+        {},
+        { attachTo: dialog, global: { stubs: { teleport: false } } }
+      );
+      await openPopover();
+
+      expect(dialog.querySelector('[data-popover-content]')).not.toBeNull();
+    });
+
+    it('keeps the mobile backdrop in the dialog containing its trigger', async () => {
+      belowMd.value = true;
+      const dialog = document.createElement('dialog');
+      document.body.appendChild(dialog);
+      mountPopover(
+        {},
+        { attachTo: dialog, global: { stubs: { teleport: false } } }
+      );
+      await openPopover();
+
+      expect(dialog.querySelector('[data-popover-backdrop]')).not.toBeNull();
+    });
+
+    it('uses the nearest dialog when dialogs are nested', async () => {
+      const outerDialog = document.createElement('dialog');
+      const innerDialog = document.createElement('dialog');
+      outerDialog.appendChild(innerDialog);
+      document.body.appendChild(outerDialog);
+      mountPopover(
+        {},
+        { attachTo: innerDialog, global: { stubs: { teleport: false } } }
+      );
+      await openPopover();
+
+      expect(
+        document.querySelector('[data-popover-content]').closest('dialog')
+      ).toBe(innerDialog);
+    });
+
+    it('continues teleporting to body when the trigger is outside a dialog', async () => {
+      mountPopover({}, { global: { stubs: { teleport: false } } });
+      await openPopover();
+
+      const panel = document.querySelector('[data-popover-content]');
+      expect(panel).not.toBeNull();
+      expect(panel.closest('dialog')).toBeNull();
+      expect(wrapper.element.contains(panel)).toBe(false);
+    });
+
+    it('prevents native Escape cancellation when dismissing a dialog popover', async () => {
+      const dialog = document.createElement('dialog');
+      document.body.appendChild(dialog);
+      mountPopover(
+        {},
+        { attachTo: dialog, global: { stubs: { teleport: false } } }
+      );
+      await openPopover();
+      const event = new KeyboardEvent('keydown', {
+        key: 'Escape',
+        bubbles: true,
+        cancelable: true,
+      });
+      document.querySelector('[data-test="panel-action"]').dispatchEvent(event);
+      await flushPromises();
+
+      expect(event.defaultPrevented).toBe(true);
+      expect(document.querySelector('[data-popover-content]')).toBeNull();
+    });
+  });
+
+  describe('popover interactions inside Dialog', () => {
+    const mountDialogPopover = async () => {
+      wrapper = mount(
+        {
+          components: { Dialog, Popover },
+          template: `<Dialog ref="dialog" :show-confirm-button="false" :show-cancel-button="false">
+          <input data-test="draft" value="Unsaved draft" />
+          <Popover>
+            <button data-test="trigger">Choose</button>
+            <template #content><button data-test="panel-action">Option</button></template>
+          </Popover>
+        </Dialog>`,
+        },
+        { attachTo: document.body, global: { stubs: { teleport: false } } }
+      );
+      const dialog = document.querySelector('dialog');
+      dialog.showModal = () => {
+        dialog.open = true;
+      };
+      dialog.close = () => {
+        dialog.open = false;
+      };
+      wrapper.findComponent(Dialog).vm.open();
+      await flushPromises();
+      document.querySelector('[data-test="trigger"]').click();
+      await flushPromises();
+      await new Promise(resolve => {
+        setTimeout(resolve, 0);
+      });
+      return dialog;
+    };
+
+    it('keeps the dialog open when clicking its teleported popover content', async () => {
+      const dialog = await mountDialogPopover();
+      document
+        .querySelector('[data-test="panel-action"]')
+        .dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+      document.querySelector('[data-test="panel-action"]').click();
+      await flushPromises();
+
+      expect(dialog.open).toBe(true);
+      expect(wrapper.findComponent(Dialog).emitted('close')).toBeUndefined();
+    });
+
+    it('dismisses a mobile popover backdrop without discarding the dialog draft', async () => {
+      belowMd.value = true;
+      const dialog = await mountDialogPopover();
+      document
+        .querySelector('[data-popover-backdrop]')
+        .dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+      document.querySelector('[data-popover-backdrop]').click();
+      await flushPromises();
+
+      expect(document.querySelector('[data-popover-content]')).toBeNull();
+      expect(dialog.open).toBe(true);
+      expect(dialog.querySelector('[data-test="draft"]').value).toBe(
+        'Unsaved draft'
+      );
+      expect(wrapper.findComponent(Dialog).emitted('close')).toBeUndefined();
+    });
+
+    it('still closes when clicking the native dialog backdrop', async () => {
+      const dialog = await mountDialogPopover();
+      dialog.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+      dialog.click();
+      await flushPromises();
+
+      expect(dialog.open).toBe(false);
+      expect(wrapper.findComponent(Dialog).emitted('close')).toHaveLength(1);
     });
   });
 

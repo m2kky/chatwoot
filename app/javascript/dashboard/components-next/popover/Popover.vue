@@ -38,6 +38,10 @@ const isActive = ref(false);
 const triggerRef = ref(null);
 const popoverRef = ref(null);
 const mobileContentRef = ref(null);
+// Body siblings are inert while a native modal dialog is open.
+const teleportTarget = computed(
+  () => triggerRef.value?.closest('dialog') || 'body'
+);
 
 const breakpoints = useBreakpoints(breakpointsTailwind);
 const belowMd = breakpoints.smaller('md');
@@ -124,7 +128,11 @@ const isNestedOverlay = event => {
 useKeyboardEvents({
   Escape: {
     action: event => {
-      if (isActive.value && !isNestedOverlay(event)) hide();
+      if (isActive.value && !isNestedOverlay(event)) {
+        // Dismiss the popover without also cancelling its parent dialog.
+        if (teleportTarget.value !== 'body') event.preventDefault();
+        hide();
+      }
     },
     allowOnFocusedInput: true,
   },
@@ -138,7 +146,7 @@ defineExpose({ show, hide, toggle });
     <slot :is-open="isActive" />
   </span>
 
-  <TeleportWithDirection to="body">
+  <TeleportWithDirection :to="teleportTarget">
     <!-- Mobile: centered modal with backdrop -->
     <div
       v-if="isActive && isMobile"

@@ -121,7 +121,15 @@ const handleDialogClose = e =>
 
 // Only close on click-outside if this dialog is the topmost one.
 // If another dialog (e.g. ProseMirror prompt) is open on top, ignore.
-const handleClickOutside = () => {
+const handleClickOutside = event => {
+  // Popovers teleport outside the form but still belong to this dialog.
+  if (
+    dialogRef.value?.contains(event.target) &&
+    event.target?.closest?.('[data-popover-content], [data-popover-backdrop]')
+  ) {
+    return;
+  }
+
   const dialogs = document.querySelectorAll('dialog[open]');
   if (dialogs[dialogs.length - 1] === dialogRef.value) requestClose();
 };
